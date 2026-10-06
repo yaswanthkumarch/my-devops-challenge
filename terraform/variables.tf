@@ -6,12 +6,12 @@ variable "namespace" {
 
 variable "memory_quota" {
   type        = string
-  description = "Total memory quota for the namespace"
+  description = "Total memory limit quota for the namespace"
   default     = "512Mi"
 }
 
 variable "api_token" {
   type        = string
-  description = "API token consumed by the app"
-  default     = "sk-skybyte-prod-7f3c9a2b1e8d4a6c"
+  description = "API token consumed by the app; supply via TF_VAR_api_token. No default on purpose — no secret belongs in code."
+  sensitive   = true
 }
