@@ -1,0 +1,39 @@
+# Baseline: nothing in devops-challenge runs as root.
+# Catches the original defect: image had no USER, so containers ran as UID 0.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root
+  annotations:
+    policies.kyverno.io/title: Require non-root containers
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers in devops-challenge must set runAsNonRoot: true or a
+      runAsUser greater than 0.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: check-run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - devops-challenge
+      validate:
+        message: >-
+          Containers in devops-challenge must not run as root:
+          set securityContext.runAsNonRoot: true or runAsUser > 0.
+        # anyPattern = the OR the baseline asks for: either form satisfies.
+        anyPattern:
+          - spec:
+              containers:
+                - securityContext:
+                    runAsNonRoot: true
+          - spec:
+              containers:
+                - securityContext:
+                    runAsUser: ">0"

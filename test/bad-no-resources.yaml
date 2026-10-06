@@ -1,0 +1,14 @@
+# Fixture for policies/kyverno-requests-limits.yaml — must fail EXACTLY that
+# policy. Non-root (passes the baseline) but declares no resources at all.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-no-resources
+  namespace: devops-challenge
+spec:
+  containers:
+    - name: app
+      image: skybyte/app:1.0.0
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001

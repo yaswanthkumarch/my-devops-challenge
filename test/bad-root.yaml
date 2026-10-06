@@ -1,0 +1,21 @@
+# Fixture for policies/kyverno-baseline.yaml — must fail EXACTLY that policy.
+# Runs as root (runAsUser: 0, no runAsNonRoot) but declares full resources,
+# so require-requests-limits must pass it.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bad-root
+  namespace: devops-challenge
+spec:
+  containers:
+    - name: app
+      image: skybyte/app:1.0.0
+      securityContext:
+        runAsUser: 0
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
