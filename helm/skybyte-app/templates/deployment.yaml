@@ -17,22 +17,69 @@ spec:
         app.kubernetes.io/name: {{ include "skybyte-app.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      # 30s kill window; gunicorn drains in 20s (graceful_timeout), leaving
+      # ~10s for kubelet bookkeeping. No preStop: gunicorn already stops
+      # accepting connections on SIGTERM (justified in DECISIONS.md).
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true      # kyverno-baseline.yaml enforces this
+        runAsUser: 10001        # matches Dockerfile USER (>= 10000)
+        runAsGroup: 10001
+        fsGroup: 10001          # emptyDir /tmp must be writable by this group
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.containerPort }}
               protocol: TCP
           env:
+            # Reference only — the Secret object is owned by Terraform.
             - name: API_TOKEN
-              value: {{ .Values.apiToken | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretName }}
+                  key: {{ .Values.secretKey }}
+          securityContext:
+            allowPrivilegeEscalation: false  # no setuid escapes
+            readOnlyRootFilesystem: true     # app writes only to /tmp (emptyDir)
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          # Liveness — "process wedged, restart it":
+          #   initialDelaySeconds 10: gunicorn boot + first-request warmup
+          #   periodSeconds 10: a real wedge is caught within ~30s
+          #   timeoutSeconds 2: localhost handler is ~1ms; 2s is ~1000x headroom,
+          #     avoids kill-loops from transient CPU steal
+          #   failureThreshold 3: one slow probe must not kill the pod
           livenessProbe:
             httpGet:
-              path: /
+              path: /healthz
               port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Readiness — "not safe for traffic, pull from endpoints":
+          #   initialDelaySeconds 5 < liveness: serve-ready checked first
+          #   periodSeconds 5: flip back into rotation within ~5s of recovery
+          #   failureThreshold 3: ~15s to pull from Service endpoints
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+      volumes:
+        - name: tmp
+          emptyDir: {}

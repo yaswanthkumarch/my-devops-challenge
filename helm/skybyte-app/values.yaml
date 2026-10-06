@@ -2,14 +2,38 @@ replicaCount: 1
 
 image:
   repository: skybyte/app
-  tag: latest
+  # Pinned, matches Chart.yaml appVersion. ":latest" + IfNotPresent meant a
+  # node could keep serving the previous image after a rebuild.
+  tag: "1.0.0"
   pullPolicy: IfNotPresent
+
+# Referenced by _helpers.tpl; empty = chart defaults apply.
+nameOverride: ""
+fullnameOverride: ""
 
 service:
   type: ClusterIP
   port: 80
 
-# API token used by the service. Rotate quarterly.
-apiToken: "sk-skybyte-prod-7f3c9a2b1e8d4a6c"
+# Non-root image listens on 8080 (can't bind 80 without a capability we drop).
+containerPort: 8080
+
+# Sized so the namespace ResourceQuota admits the pod: quota allows 250m/512Mi
+# requests and 500m/512Mi limits per namespace; this pod uses 20%/25% of it.
+# One hello-world replica: 64Mi covers python+gunicorn RSS (~40-50Mi) with ~30%
+# headroom; 100m CPU is ~2x observed idle, enough for probe + traffic bursts.
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 128Mi
+
+# Secret is deliberately NOT in values. It is created by Terraform
+# (kubernetes_secret "api-token", sensitive var, no default) and consumed
+# here by reference only — one owner, no drift.
+secretName: api-token
+secretKey: token
 
 namespace: devops-challenge
