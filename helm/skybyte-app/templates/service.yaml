@@ -5,6 +5,14 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "skybyte-app.labels" . | nindent 4 }}
+  # Prometheus scrape annotations (chosen over a ServiceMonitor — see
+  # DECISIONS.md: no CRD dependency, so kubeconform validates with built-in
+  # schemas; a ServiceMonitor would need prometheus-operator CRD schemas or
+  # a weaker -ignore-missing-schemas run).
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "80"
+    prometheus.io/path: "/metrics"
 spec:
   type: {{ .Values.service.type }}
   ports:
