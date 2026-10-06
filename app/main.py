@@ -1,4 +1,8 @@
-"""Skybyte greeting service."""
+"""Skybyte greeting service.
+
+Served by gunicorn (see gunicorn.conf.py) so SIGTERM stops new connections and
+drains in-flight requests; never run via app.run() in the container.
+"""
 import os
 import time
 
@@ -13,6 +17,8 @@ from prometheus_client import (
 app = Flask(__name__)
 
 VERSION = "1.0.0"
+# Kept to exercise the Terraform -> kubernetes_secret -> env delivery path.
+# No handler uses it today; removing the plumbing would break that contract.
 API_TOKEN = os.environ.get("API_TOKEN", "")
 
 # path label is the ROUTE PATTERN (request.url_rule), never the raw path:
@@ -55,8 +61,17 @@ def hello():
 
 @app.route("/healthz")
 def healthz():
-    # TODO: actually check something useful
-    return "ok", 200
+    # Liveness: "the process is not wedged". Must stay dependency-free so a
+    # broken downstream cannot cascade into restarts.
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route("/readyz")
+def readyz():
+    # Readiness: "safe to send me traffic now". Separate endpoint from
+    # /healthz so dependency checks can be added here without the risk of
+    # liveness restarts.
+    return jsonify({"status": "ready"}), 200
 
 
 @app.route("/metrics")
