@@ -1,0 +1,18 @@
+# Keep the production image minimal: tests, caches and infra never ship.
+.git/
+.github/
+helm/
+terraform/
+policies/
+test/
+app/tests/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+AUDIT.md
+DECISIONS.md
+CHALLENGE.md
+README.md
+setup.sh
+system-checks.sh
