@@ -73,14 +73,14 @@ jobs:
         run: docker buildx build --platform linux/amd64 -t skybyte/app:ci --load .
 
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: fs
           severity: HIGH,CRITICAL
           exit-code: '1'
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: skybyte/app:ci
           severity: HIGH,CRITICAL
