@@ -6,7 +6,10 @@ on:
 
 jobs:
   lint-and-build:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: the latest label migrates to a new Ubuntu
+    # release mid-window (warning in the run log) and tool behavior must not
+    # shift under a reproducibility-focused build.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,6 +64,11 @@ jobs:
           terraform init -backend=false
           terraform validate
 
+      # Cross-arch RUN steps need binfmt handlers on the runner; without
+      # QEMU the arm64 leg dies with "exec format error" during pip install.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -72,11 +80,23 @@ jobs:
       - name: Load amd64 image for scanning
         run: docker buildx build --platform linux/amd64 -t skybyte/app:ci --load .
 
+      # Gate policy: fail on HIGH/CRITICAL that HAVE a fix available.
+      # A digest-pinned base cannot take in-place package updates, so CVEs
+      # disclosed with no fix shipped (status: affected / fix_deferred /
+      # will_not_fix) would keep the pipeline permanently red with zero
+      # action available — that is noise, and noise trains people to ignore
+      # red. The moment Debian publishes a fix, the CVE re-enters scope,
+      # the build goes red again, and the response is a one-line digest
+      # refresh (DECISIONS.md, Trivy gate). Verified 2026-10-07: every
+      # HIGH/CRITICAL on the pinned 3.12-slim-bookworm digest is unfixed.
       - name: Trivy filesystem scan
+        # v-prefixed tag: the bare 0.28.0 ref does not exist and failed
+        # action resolution before any step ran.
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           severity: HIGH,CRITICAL
+          ignore-unfixed: 'true'
           exit-code: '1'
 
       - name: Trivy image scan
@@ -84,6 +104,7 @@ jobs:
         with:
           image-ref: skybyte/app:ci
           severity: HIGH,CRITICAL
+          ignore-unfixed: 'true'
           exit-code: '1'
 
       - name: Install kyverno CLI
@@ -93,13 +114,16 @@ jobs:
           tar -xzf /tmp/kyverno.tgz -C /tmp kyverno
           sudo mv /tmp/kyverno /usr/local/bin/kyverno
 
+      # CLI arg order: policies first, resources via --resource. The old
+      # `--policy` flag does not exist in kyverno-cli 1.12.x — the step
+      # errored out regardless of content (unknown flag = exit 1).
       - name: Kyverno — rendered manifests must pass
-        run: kyverno apply rendered.yaml --policy policies/ --detailed-results
+        run: kyverno apply policies/ --resource rendered.yaml --detailed-results
 
       - name: Kyverno — bad fixtures must be rejected
         run: |
           # Exit 1 = violations found = the policies actually bite.
-          if kyverno apply test/ --policy policies/ >/dev/null 2>&1; then
+          if kyverno apply policies/ --resource test/ >/dev/null 2>&1; then
             echo "ERROR: bad-manifest fixtures passed the policies"
             exit 1
           fi
