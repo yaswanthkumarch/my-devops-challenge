@@ -28,7 +28,20 @@ spec:
           Containers in devops-challenge must not run as root:
           set securityContext.runAsNonRoot: true or runAsUser > 0.
         # anyPattern = the OR the baseline asks for: either form satisfies.
+        # Both levels are accepted because Kubernetes allows the setting at
+        # pod OR container scope (PSS semantics) — and the chart sets it at
+        # pod level, while bad fixtures set it (wrongly) at container level.
+        # Autogen rewrites `spec` -> `spec.template.spec` for controllers, so
+        # this matches Deployments too.
         anyPattern:
+          # pod-level
+          - spec:
+              securityContext:
+                runAsNonRoot: true
+          - spec:
+              securityContext:
+                runAsUser: ">0"
+          # container-level
           - spec:
               containers:
                 - securityContext:
