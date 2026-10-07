@@ -14,28 +14,93 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          # Matches the image base (python:3.12-slim-bookworm).
+          python-version: '3.12'
 
-      - name: Install flake8
-        run: pip install flake8
+      - name: Install dependencies (runtime + dev)
+        run: |
+          pip install -r app/requirements.txt -r app/requirements-dev.txt
 
-      - name: Lint Python
-        run: flake8 app/ --exclude=app/* --exit-zero
+      - name: Ruff (lint, fails on violation)
+        run: ruff check app/
+
+      - name: Pytest (incl. metrics endpoint contract)
+        run: python -m pytest app/tests -v
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
       - name: Helm lint
-        run: helm lint helm/skybyte-app || true
+        run: helm lint helm/skybyte-app
+
+      - name: Install kubeconform
+        run: |
+          curl -sSL -o /tmp/kubeconform.tgz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tgz -C /tmp kubeconform
+          sudo mv /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: Helm template
+        run: |
+          helm template skybyte-app helm/skybyte-app \
+            --namespace devops-challenge > rendered.yaml
+
+      # Core-workload schemas only: the chart uses scrape annotations (not
+      # ServiceMonitor CRDs) precisely so no extra schema sources are needed.
+      # No -ignore-missing-schemas: an unknown kind must fail the build.
+      - name: Kubeconform (schema-validate rendered manifests)
+        run: kubeconform -strict -summary rendered.yaml
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform validate
+      - name: Terraform fmt -check + validate
         run: |
           cd terraform
+          terraform fmt -check -recursive
           terraform init -backend=false
-          terraform validate || true
+          terraform validate
 
-      - name: Build Docker image
-        run: docker build -t skybyte/app:ci .
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # No push: this proves both architectures build.
+      - name: Docker buildx (linux/amd64 + linux/arm64)
+        run: docker buildx build --platform linux/amd64,linux/arm64 -t skybyte/app:ci .
+
+      # Second build hits the layer cache; loads amd64 locally for Trivy.
+      - name: Load amd64 image for scanning
+        run: docker buildx build --platform linux/amd64 -t skybyte/app:ci --load .
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: skybyte/app:ci
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Install kyverno CLI
+        run: |
+          curl -sSL -o /tmp/kyverno.tgz \
+            https://github.com/kyverno/kyverno/releases/download/v1.12.5/kyverno-cli_v1.12.5_linux_x86_64.tar.gz
+          tar -xzf /tmp/kyverno.tgz -C /tmp kyverno
+          sudo mv /tmp/kyverno /usr/local/bin/kyverno
+
+      - name: Kyverno — rendered manifests must pass
+        run: kyverno apply rendered.yaml --policy policies/ --detailed-results
+
+      - name: Kyverno — bad fixtures must be rejected
+        run: |
+          # Exit 1 = violations found = the policies actually bite.
+          if kyverno apply test/ --policy policies/ >/dev/null 2>&1; then
+            echo "ERROR: bad-manifest fixtures passed the policies"
+            exit 1
+          fi
+          echo "OK: fixtures rejected as expected"
