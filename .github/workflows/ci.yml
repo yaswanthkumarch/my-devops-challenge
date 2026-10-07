@@ -104,3 +104,4 @@ jobs:
             exit 1
           fi
           echo "OK: fixtures rejected as expected"
+
